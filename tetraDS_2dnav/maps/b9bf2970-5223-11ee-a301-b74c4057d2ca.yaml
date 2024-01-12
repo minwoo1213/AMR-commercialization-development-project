@@ -1,0 +1,7 @@
+image: b9bf2970-5223-11ee-a301-b74c4057d2ca.pgm
+resolution: 0.050000
+origin: [-8.866122, -11.487692, 0.000000]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
+

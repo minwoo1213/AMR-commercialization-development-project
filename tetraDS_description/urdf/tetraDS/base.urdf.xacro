@@ -1,0 +1,191 @@
+<?xml version="1.0"?>
+
+<robot name="tetraDS" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <!-- Define a number of dimensions using properties -->
+  <xacro:property name="base_length" value="0.473" />
+  <xacro:property name="base_radius" value="0.2365" />
+  <xacro:property name="wheel_length" value="0.047" />
+  <xacro:property name="wheel_radius" value="0.085" />
+  <xacro:property name="wheel_offset_x" value="0.0" />
+  <xacro:property name="wheel_offset_y" value="0.197525" /> <!--0.207-->
+  <xacro:property name="wheel_offset_z" value="-0.100" />
+  <xacro:property name="caster_offset_x" value="0.0" />
+  <xacro:property name="caster_offset_y" value="0.169525" />
+  <xacro:property name="caster_offset_z" value="0.0" />
+  <xacro:property name="PI" value="3.1415926" />
+
+  <xacro:macro name="cylinder_inertia" params="m r h">
+        <inertia ixx="${m*(3*r*r+h*h)/12}" ixy="0" ixz="0" iyy="${m*(3*r*r+h*h)/12}" iyz="0" izz="${m*r*r/2}" />
+  </xacro:macro>
+     
+  <!-- define a wheel -->
+  <joint name="base_l_wheel_joint" type="fixed">
+    <axis xyz="0 1 0" />
+    <origin xyz="${wheel_offset_x} ${wheel_offset_y} 0" rpy="0 0 0" />
+    <parent link="base_link"/>
+    <child link="base_l_wheel_link"/>
+   </joint>
+    <link name="base_l_wheel_link">
+  <visual>
+    <origin xyz=" 0 ${wheel_offset_y} 0 " rpy="0 0 1.5708" />
+	<geometry>
+	  <mesh filename="package://tetraDS_description/meshes/Wheel Left.STL" scale="0.001 0.001 0.001" />
+	</geometry>
+	<material name="DarkGrey"/>
+  </visual>
+    </link>
+ 
+ <joint name="base_r_wheel_joint" type="fixed">
+    <axis xyz="0 1 0" />
+    <origin xyz="${wheel_offset_x} ${-1.0*wheel_offset_y} 0" rpy="0 0 0" />
+    <parent link="base_link"/>
+    <child link="base_r_wheel_link"/>
+   </joint>
+    <link name="base_r_wheel_link">
+  <visual>
+    <origin xyz=" 0 ${-1.0*wheel_offset_y} 0 " rpy="0 0 1.5708" />
+	<geometry>
+	  <mesh filename="package://tetraDS_description/meshes/Wheel Right.STL" scale="0.001 0.001 0.001" />
+	</geometry>
+	<material name="DarkGrey"/>
+  </visual>
+    </link>
+
+  <!-- The base xacro macro -->
+  <xacro:macro name="base" params="name color">
+   <link name="${name}_link">
+    <visual>
+    <origin xyz=" 0 0 0 " rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://tetraDS_description/meshes/Platform Body_L.STL" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="Black"/>        
+    </visual>
+      <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <cylinder length="${base_length}" radius="${base_radius}"/>
+            </geometry>
+      </collision>
+    </link>
+  </xacro:macro>
+  
+  <link name="base_footprint">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" /> 
+        <geometry>
+	  <box size="0.868 0.868 0.001" />
+        </geometry>
+        <material name="TransparentGreen" />
+      </visual>
+  </link>
+
+  <joint name="base_joint" type="fixed"> <!--fixed-->   
+    <origin xyz="0 0 ${-wheel_offset_z}" rpy="0 0 0" />
+    <parent link="base_footprint"/>
+    <child link="base_link" />
+  </joint>
+
+ <!-- define a front caster add by mwcha -->
+  <joint name="front_l_caster_joint" type="fixed">
+    <axis xyz="0 1 0" />
+    <origin xyz="${caster_offset_x} ${caster_offset_y} 0" rpy="0 0 0" />
+    <parent link="base_link"/>
+    <child link="front_l_caster_link"/>
+   </joint>
+    <link name="front_l_caster_link">
+  <visual>
+    <origin xyz=" 0.290 ${caster_offset_y} 0.032 " rpy="0 0 0" /> <!-- H model x y z -->
+	<geometry>
+	  <mesh filename="package://tetraDS_description/meshes/Caster Yoke.STL" scale="0.001 0.001 0.001" />
+	</geometry>
+	<material name="TransparentYellow"/>
+  </visual>
+    </link>
+ 
+ <joint name="front_r_caster_joint" type="fixed">
+    <axis xyz="0 1 0" />
+    <origin xyz="${caster_offset_x} ${-1.0*caster_offset_y} 0" rpy="0 0 0" />
+    <parent link="base_link"/>
+    <child link="front_r_caster_link"/>
+   </joint>
+    <link name="front_r_caster_link">
+  <visual>
+    <origin xyz=" 0.290 ${-1.0*caster_offset_y} 0.032 " rpy="0 0 0" /> <!-- H model x y z -->
+	<geometry>
+	  <mesh filename="package://tetraDS_description/meshes/Caster Yoke.STL" scale="0.001 0.001 0.001" />
+	</geometry>
+	<material name="TransparentYellow"/>
+  </visual>
+    </link>
+
+ <!-- define a behind caster add by mwcha -->
+  <joint name="behind_l_caster_joint" type="fixed">
+    <axis xyz="0 1 0" />
+    <origin xyz="${caster_offset_x} ${caster_offset_y} 0" rpy="0 0 0" />
+    <parent link="base_link"/>
+    <child link="behind_l_caster_link"/>
+   </joint>
+    <link name="behind_l_caster_link">
+  <visual>
+    <origin xyz=" -0.290 ${caster_offset_y} 0.032 " rpy="0 0 0" /> <!-- H model x y z -->
+	<geometry>
+	  <mesh filename="package://tetraDS_description/meshes/Caster Yoke.STL" scale="0.001 0.001 0.001" />
+	</geometry>
+	<material name="TransparentYellow"/>
+  </visual>
+    </link>
+ 
+ <joint name="behind_r_caster_joint" type="fixed">
+    <axis xyz="0 1 0" />
+    <origin xyz="${caster_offset_x} ${-1.0*caster_offset_y} 0" rpy="0 0 0" />
+    <parent link="base_link"/>
+    <child link="behind_r_caster_link"/>
+   </joint>
+    <link name="behind_r_caster_link">
+  <visual>
+    <origin xyz=" -0.290 ${-1.0*caster_offset_y} 0.032 " rpy="0 0 0" /> <!-- H model x y z -->
+	<geometry>
+	  <mesh filename="package://tetraDS_description/meshes/Caster Yoke.STL" scale="0.001 0.001 0.001" />
+	</geometry>
+	<material name="TransparentYellow"/>
+  </visual>
+    </link>
+
+ <!-- define a lidar model - no information of TF and only model ... add by mwcha -->
+  <joint name="tim571_f_lidar" type="fixed">
+    <axis xyz="0 1 0" />
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+    <parent link="base_link"/>
+    <child link="tim571_f_lidar"/>
+   </joint>
+    <link name="tim571_f_lidar">
+  <visual>
+    <origin xyz="0.38013 -0.35035 0.10" rpy="1.5708 0 -1.5708" /> <!-- an inaccurate figure because it used only for model display -->
+	<geometry>
+	  <mesh filename="package://tetraDS_description/meshes/tim571.STL" scale="0.001 0.001 0.001" />
+	</geometry>
+	<material name="Black"/>
+  </visual>
+    </link>
+ 
+ <joint name="tim571_b_lidar" type="fixed">
+    <axis xyz="0 1 0" />
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+    <parent link="base_link"/>
+    <child link="tim571_b_lidar"/>
+   </joint>
+    <link name="tim571_b_lidar">
+  <visual>
+    <origin xyz="-0.38013 0.35035 0.10" rpy="1.5708 0 1.5708" /> <!-- an inaccurate figure because it used only for model display -->
+	<geometry>
+	  <mesh filename="package://tetraDS_description/meshes/tim571.STL" scale="0.001 0.001 0.001" />
+	</geometry>
+	<material name="Black"/>
+  </visual>
+    </link>
+
+</robot>
+
