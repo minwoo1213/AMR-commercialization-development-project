@@ -10,4 +10,5 @@ int32 EMG
 int32 bumper
 int32 charging
 int32 running_mode
+int32 Lift
 

@@ -33,6 +33,8 @@ add_service_files(
   loadcell_callibration.srv
   conveyor_manual_movement.srv
   conveyor_auto_movement.srv
+  lift_manual_movement.srv
+  lift_auto_movement.srv
   power_set_enable.srv
   power_wheel_enable.srv
   power_parameter_read.srv

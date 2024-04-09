@@ -1,5 +1,0 @@
-#This message is used to send command to tetra
-#Lift hole Lifting Check command
-
----
-bool command_Result

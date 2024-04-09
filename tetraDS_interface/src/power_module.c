@@ -1109,20 +1109,48 @@ int power_read_GPIO(int fd,  int *Input, int *Output)
 
 ///CONVEYOR//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Conveyor Function//
-int power_conveyor_movement(int fd, int mode)
+
+// int power_conveyor_movement(int fd, int mode)
+// {
+// 	int ret;
+// 	unsigned char packet_buf[255] = {STX, 'C', 'N'};
+	
+// 	if(!fd) return -1;
+
+// 	if(mode == 1) //Start 
+// 	{
+// 		packet_buf[3] = '1';
+// 	}
+// 	else //Stop
+// 	{
+// 		packet_buf[3] = '0';
+// 	}
+// 	packet_buf[4] = ETX;
+// 	packet_buf[5] = make_lrc(&packet_buf[1], 4);
+
+// 	ret = write(fd, packet_buf, 6);
+// 	if(ret <= 0) return -2;
+
+// 	memset(packet_buf, 0, sizeof(unsigned char)*255);
+// 	ret = get_response(fd, packet_buf);
+// 	//printf("packet_buf[1]: %02x \n", packet_buf[1]);
+// 	return ret;
+// }
+
+int power_lift_movement(int fd, int mode)
 {
 	int ret;
 	unsigned char packet_buf[255] = {STX, 'C', 'N'};
 	
 	if(!fd) return -1;
 
-	if(mode == 1) //Start 
-	{
-		packet_buf[3] = '1';
-	}
-	else //Stop
+	if(mode == 0)  //set origin and down
 	{
 		packet_buf[3] = '0';
+	}
+	else //lift up (mode == 1)
+	{
+		packet_buf[3] = '1';
 	}
 	packet_buf[4] = ETX;
 	packet_buf[5] = make_lrc(&packet_buf[1], 4);

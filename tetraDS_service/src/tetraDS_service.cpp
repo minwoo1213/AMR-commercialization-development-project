@@ -84,8 +84,8 @@ using namespace rapidjson;
 #include "tetraDS_service/runmapping.h" //SRV
 #include "tetraDS_service/runnavigation.h" //SRV
 #include "tetraDS_service/rosnodekill.h" //SRV
-#include "tetraDS_service/rosnode_markerkill10.h" //SRV ...240103 mwcha
-#include "tetraDS_service/rosnode_markerkill20.h" //SRV ...240103 mwcha
+#include "tetraDS_service/set_marker10.h" //SRV ...240103 mwcha
+#include "tetraDS_service/set_marker20.h" //SRV ...240103 mwcha
 #include "tetraDS_service/getmaplist.h" //SRV
 #include "tetraDS_service/deletemap.h" //SRV
 #include "tetraDS_service/ledcontrol.h" //SRV
@@ -282,14 +282,11 @@ typedef struct FALG_VALUE
     bool m_bflag_Lift_docking = false; //231123 mwcha
     bool m_bFlag_Disable_bumper = false;
     bool m_Onetime_reset_flag = false;
-    //Tracking obstacle Check//
-    bool m_bFlag_Obstacle_Right = false;
-    //bool m_bFlag_Obstacle_Center = false; //realsense use ... H model made by mwcha
+    //bool m_bFlag_Obstacle_Center = false; //laser use ... H model made by mwcha
     bool m_bFlag_Obstacle_Left = false;
-    //Tracking obstacle Check ... lidar_b add mwcha
+    bool m_bFlag_Obstacle_Left_b = false;   
+    bool m_bFlag_Obstacle_Right = false;
     bool m_bFlag_Obstacle_Right_b = false;
-    //bool m_bFlag_Obstacle_Center_b = false; //realsense use ... H model made by mwcha
-    bool m_bFlag_Obstacle_Left_b = false;
     //PCL obstacle Check//
     bool m_bFlag_Obstacle_PCL1 = false;
     bool m_bFlag_Obstacle_PCL2 = false;
@@ -394,6 +391,7 @@ typedef struct ROBOT_STATUS
     int m_iCallback_EMG = 0;
     int m_iCallback_Bumper = 0;
     int m_iCallback_Charging_status = 0;
+    // int m_iCallback_Lift = 0; //Callback for Lift option    
     //Bumper Collision Behavior//
     int m_iBumperCollisionBehavor_cnt = 0;
     //auto test
@@ -405,11 +403,9 @@ typedef struct ROBOT_STATUS
     int CONVEYOR_ID = 0;
     int CONVEYOR_MOVEMENT = 0; // 0: nomal , 1: Loading , 2: Unloading
     //Lift Info..(Option) 231123 mwcha
-    //double m_dLoadcell_weight = 0.0;
     int m_iLift_Sensor_info = 0;
     int LIFT_ID = 0;
     int LIFT_MOVEMENT = 0; // 0: origin and down , 1: Lifting
-
 
 }ROBOT_STATUS;
 ROBOT_STATUS _pRobot_Status;
@@ -448,6 +444,9 @@ float m_Ultrasonic_RR_Range = 0.0;
 
 //roslaunch mode check//
 int ex_ilaunchMode = 0;
+
+//Makrer mode check//
+int ex_iLiftMode = 0;
 
 //dynamic parameter//
 typedef struct DYNAMIC_PARAM
@@ -535,10 +534,10 @@ tetraDS_service::runnavigation navigation_cmd;
 ros::ServiceServer navigation_service;
 tetraDS_service::rosnodekill nodekill_cmd;
 ros::ServiceServer nodekill_service;
-tetraDS_service::rosnode_markerkill10 node_marker_kill10_cmd; //240103 mwcha
-ros::ServiceServer nodekill_marker10_service; //240103 mwcha
-tetraDS_service::rosnode_markerkill20 node_marker_kill20_cmd; //240103 mwcha
-ros::ServiceServer nodekill_marker20_service; //240103 mwcha
+tetraDS_service::set_marker10 set_marker10_cmd; //240103 mwcha
+ros::ServiceServer set_marker10_service; //240103 mwcha
+tetraDS_service::set_marker20 set_marker20_cmd; //240103 mwcha
+ros::ServiceServer set_marker20_service; //240103 mwcha
 tetraDS_service::getmaplist maplist_cmd;
 ros::ServiceServer maplist_service;
 tetraDS_service::gotocancel gotocancel_cmd;
@@ -1549,6 +1548,14 @@ void setGoal(move_base_msgs::MoveBaseActionGoal& goal)
     goal.goal.target_pose.pose.orientation.z = _pGoal_pose.goal_quarterZ;
     goal.goal.target_pose.pose.orientation.w = _pGoal_pose.goal_quarterW;
 
+    //costmap clear call//
+	m_flag_clesr_costmap_call = clear_costmap_client.call(m_request);
+	while(!m_flag_clesr_costmap_call)
+	{
+		sleep(1);
+	}
+	m_flag_clesr_costmap_call = false;
+
     service_pub.publish(goal);
     printf("setGoal call: %.5f, %.5f !!\n", _pGoal_pose.goal_positionX, _pGoal_pose.goal_positionY);
     _pFlag_Value.m_bFlag_pub = true;
@@ -1697,8 +1704,10 @@ bool Depart_Station2Move()
     geometry_msgs::TwistPtr cmd(new geometry_msgs::Twist());
     if(_pAR_tag_pose.m_transform_pose_x <= 0.8) //800mm depart move ... 231130 mwcha
     {
-        if(_pFlag_Value.m_bFlag_Obstacle_cygbot)
+        // if(_pRobot_Status.m_iCallback_Bumper = 8) //Back bumper mwcha 240329 mwcha
+        if(_pFlag_Value.m_bFlag_Obstacle_Left_b && _pFlag_Value.m_bFlag_Obstacle_Right_b)
         {
+            printf("Detected laser scan behind obstacle !! \n");
             cmd->linear.x =  0.0; 
             cmd->angular.z = 0.0;
             cmdpub_.publish(cmd);
@@ -1729,60 +1738,155 @@ bool Depart_Station2Move()
     return bResult;
 }
 
-bool Depart_Lift_Move() // 231205 mwcha
+
+bool Lift_Check() //240401 mwcha
 {
     bool bResult = false;
-    
-    printf(" Call Depart_Lift_Move \n");
 
-    geometry_msgs::TwistPtr cmd(new geometry_msgs::Twist());
-    if(_pRobot_Status.m_iCallback_Bumper != 1) //800mm depart move ... 231130 mwcha
+    if(_pRobot_Status.m_iConveyor_Sensor_info > 0)
     {
-        if(_pFlag_Value.m_bFlag_Obstacle_cygbot)
+        if(_pRobot_Status.m_iConveyor_Sensor_info > 1)
         {
-            cmd->linear.x =  0.0; 
-            cmd->angular.z = 0.0;
-            cmdpub_.publish(cmd);
+            printf("Lift_sensor value ERROR, need to check sensor and robot`s model, check your conveyor BOARD \n");
             bResult = false;
         }
         else
         {
-            cmd->linear.x =  -0.01; 
-            cmd->angular.z = 0.0;
-            cmdpub_.publish(cmd);
+            printf("Robot can not go to lift, Because It has lifted something this time !! \n");
+            //todo... need to spread about robot status
+            ex_iDocking_CommandMode = 0;
             bResult = false;
-        }    
+        }
     }
     else
     {
-        cmd->linear.x =  0.0; 
-        cmd->angular.z = 0.0;
-        cmdpub_.publish(cmd);
-
-        ex_iDocking_CommandMode = 17;
-
+        // ex_iLiftMode = 1; //callback, lifting
+        ex_iDocking_CommandMode = 12;
+        printf("SET ar_marker_20 and Go to lift \n");
         bResult = true;
     }
-    
+
     return bResult;
 }
 
-bool Depart_3sec_Liftmove() // not use cygbot lidar because backward move in port ... 231204 mwcha
+bool Un_Lift_Check() //240401 mwcha
 {
-    printf("GO Depart 3sec IN LIFT PORT \n");
-
     bool bResult = false;
+
+    if(_pRobot_Status.m_iConveyor_Sensor_info != 0)
+    {
+
+        printf("Robot can not go to lift, Because It has not lifted anything this time !! \n");
+        //todo... need to spread about robot status
+        ex_iDocking_CommandMode = 0;
+        bResult = false;
+    }
+    else
+    {
+        // ex_iLiftMode = 1; //callback, lifting
+        ex_iDocking_CommandMode = 22;
+        printf(" Go to Un Lift !! \n");
+        bResult = true;
+    }
+
+    return bResult;
+}
+
+
+bool Depart_10mm_Liftmove() // not use cygbot lidar because backward move in port ... 240403 mwcha
+{
+    if(_pRobot_Status.m_iCallback_Bumper = 1)
+    {
+        printf("GO Depart 10mm OUT OF LIFT PORT \n");
+        geometry_msgs::TwistPtr cmd(new geometry_msgs::Twist());
+        ros::Time start_time = ros::Time::now();
+        ros::Duration duration(1.0); //define duration seconds
+        ros::Rate rate(10); // 10Hz
+
+        while(ros::Time::now() - start_time < duration)
+        {
+            cmd->linear.x = -0.01; //0.05m/s max velocity depart move * 2sec = distance : 0.1m
+            cmd->angular.z = 0.0;
+            cmdpub_.publish(cmd);
+            
+            ros::spinOnce();
+            rate.sleep();
+        }
+
+        cmd->linear.x = 0.0;
+        cmd->angular.z = 0.0;
+        cmdpub_.publish(cmd);
+        printf("BackMove 10mm LIFT PORT! \n");
+
+        ex_iDocking_CommandMode = 151;
+        return true;
+    }
+
+    printf("[Error] Robot can`t backmove, It has damaged crtical ISSUE ! \n");
+    return false;
+}
+
+bool Un_Depart_10mm_Liftmove() // not use cygbot lidar because backward move in port ... 240403 mwcha
+{
+    if(_pRobot_Status.m_iCallback_Bumper = 1)
+    {
+        printf("GO Depart 10mm OUT OF LIFT PORT \n");
+        geometry_msgs::TwistPtr cmd(new geometry_msgs::Twist());
+        ros::Time start_time = ros::Time::now();
+        ros::Duration duration(1.0); //define duration seconds
+        ros::Rate rate(10); // 10Hz
+
+        while(ros::Time::now() - start_time < duration)
+        {
+            cmd->linear.x = -0.01; //0.05m/s max velocity depart move * 2sec = distance : 0.1m
+            cmd->angular.z = 0.0;
+            cmdpub_.publish(cmd);
+            
+            ros::spinOnce();
+            rate.sleep();
+        }
+
+        cmd->linear.x = 0.0;
+        cmd->angular.z = 0.0;
+        cmdpub_.publish(cmd);
+        printf("BackMove 10mm LIFT PORT! \n");
+
+        ex_iDocking_CommandMode = 171;
+        return true;
+    }
+
+    printf("[Error] Robot can`t backmove, It has damaged crtical ISSUE ! \n");
+    return false;
+}
+
+bool Depart_1500mm_Liftmove() // not use cygbot lidar because backward move in port ... 240207 mwcha
+{
+    printf("GO Depart 1500mm OUT OF LIFT PORT \n");
+
+    LED_Toggle_Control(1, 5,100,5,1);
+    LED_Turn_On(63);
 
     geometry_msgs::TwistPtr cmd(new geometry_msgs::Twist());
     ros::Time start_time = ros::Time::now();
-    ros::Duration duration(3.0);
+    ros::Duration duration(15.0); //define duration seconds
+    ros::Rate rate(10); // 10Hz
 
-    while (ros::Time::now() - start_time < duration)
+    while(ros::Time::now() - start_time < duration)
     {
+        cmd->linear.x = -0.1; //0.1m/s max velocity depart move * 15sec = distance : 1.5m
+        cmd->angular.z = 0.0;
         cmdpub_.publish(cmd);
+        
+        ros::spinOnce();
+        rate.sleep();
     }
+    //TODO .... stop when laser detected
+    cmd->linear.x = 0.0;
+    cmd->angular.z = 0.0;
+    cmdpub_.publish(cmd);
+    printf("BackMove until LIFT PORT! \n");
 
-    ex_iDocking_CommandMode = 17;
+    ex_iDocking_CommandMode = 0;
     return true;
 }
 
@@ -2049,6 +2153,8 @@ bool GetInformation_Command(tetraDS_service::getinformation::Request  &req,
     res.bumper = _pRobot_Status.m_iCallback_Bumper;
     res.charging = _pRobot_Status.m_iCallback_Charging_status;
     res.running_mode = ex_ilaunchMode; //0:nomal, 1:mapping, 2:navigation
+    // res.Lift = ex_iLiftMode = 0; //0: normal, 1:Lifting, 9:ERROR while lifting, 10: set_marker_size_10, 20: set_marker_size_20
+
     /*
     ---
     bool command_Result
@@ -2057,6 +2163,8 @@ bool GetInformation_Command(tetraDS_service::getinformation::Request  &req,
     bool EMG
     bool bumper
     bool charging
+    int32 running_mode
+    int32 Lift
     */
 
 	bResult = res.command_Result = true;
@@ -2420,6 +2528,48 @@ bool Patrol_Command(tetraDS_service::patrol::Request &req,
 	return true;
 }
 
+bool LiftMovement1(ros::ServiceClient& lift_cmd_client)
+{
+    lift_srv.request.start = 0; //set origin and down
+
+    if (lift_cmd_client.call(lift_srv))
+    {
+        ROS_INFO("Lift movement 0 ... CNO LIFT DOWN ! ");
+
+        // Wait for 15 seconds
+        std::chrono::seconds duration(15);
+        std::this_thread::sleep_for(duration);
+
+        return true;
+    }
+    else
+    {
+        ROS_ERROR("Failed to call lift_auto_movement service !");
+        return false;
+    }
+}
+
+bool LiftMovement2(ros::ServiceClient& lift_cmd_client)
+{
+    lift_srv.request.start = 1; // lift up
+
+    if (lift_cmd_client.call(lift_srv))
+    {
+        ROS_INFO("Lift movement 1 ... CN1 LIFT UP ! ");
+
+        // Wait for 15 seconds
+        std::chrono::seconds duration(15);
+        std::this_thread::sleep_for(duration);
+
+        return true;
+    }
+    else
+    {
+        ROS_ERROR("Failed to call lift_auto_movement service !");
+        return false;
+    }
+}
+
 // bool Patrol_Conveyor_Command(tetraDS_service::patrol_conveyor::Request &req, 
 // 				             tetraDS_service::patrol_conveyor::Response &res)
 // {
@@ -2446,16 +2596,16 @@ bool Patrol_Command(tetraDS_service::patrol::Request &req,
 // }
 
 bool Patrol_lift_Command(tetraDS_service::patrol_lift::Request &req, 
-    			             tetraDS_service::patrol_lift::Response &res) //231123 mwcha
+    			             tetraDS_service::patrol_lift::Response &res) //Go to lift !! Patrol 2
 {
  	bool bResult = false;
 
-     _pFlag_Value.m_bflag_patrol2 = req.on;
-     m_iLifting_ID = req.lifting_id;
-     m_iUnlifting_ID = req.unlifting_id;
-     m_strLifting_lobcation_name = req.lifting_location_name;
-     m_strUnlifting_lobcation_name = req.unlifting_location_name;
-     bResult = true;
+    _pFlag_Value.m_bflag_patrol2 = req.on;
+    m_iLifting_ID = req.lifting_id;
+    m_iUnlifting_ID = req.unlifting_id;
+    m_strLifting_lobcation_name = req.lifting_location_name;
+    m_strUnlifting_lobcation_name = req.unlifting_location_name;
+    bResult = true;
  	res.command_Result = bResult;
  	return true;
 }
@@ -2620,6 +2770,7 @@ void Reset_Robot_Pose()
 
         Reset_EKF_SetPose();
     }
+    // reset robot pose when robot is not in HOME
 
     Marker_Reset_Robot_Pose();
 
@@ -2790,6 +2941,11 @@ void BatteryCallback(const std_msgs::Int32::ConstPtr& msg)
     _pRobot_Status.m_iCallback_Battery = msg->data;
 }
 
+// void MarkerSizeCallback(const std_msgs::Int32::ConstPtr& msg)
+// {
+//    _pRobot_status.m_iMarker_Size_status = msg->data;
+// }
+
 void EMGCallback(const std_msgs::Int32::ConstPtr& msg)
 {
     _pRobot_Status.m_iCallback_EMG = msg->data;
@@ -2828,8 +2984,13 @@ void BumperCallback(const std_msgs::Int32::ConstPtr& msg) // mwcha ... 231205
         {
             if(docking_progress.data > 10 && docking_progress.data < 20)
             {
-                printf("Front Bumper hit in the LIFT STATION ! \n");
+                printf("Front Bumper hit in the LIFT STATION [LIFT] ! \n");
                 ex_iDocking_CommandMode = 16;
+            }
+            if(docking_progress.data > 20 && docking_progress.data < 30)
+            {
+                printf("Front Bumper hit in the LIFT STATION [UN LIFT] ! \n");
+                ex_iDocking_CommandMode = 26;
             }
             LED_Toggle_Control(1, 10, 100, 10, 1);
             LED_Turn_On(18);
@@ -2871,71 +3032,7 @@ void BumperCallback(const std_msgs::Int32::ConstPtr& msg) // mwcha ... 231205
         }
     }
 }
-
 /*
-void BumperCallback(const std_msgs::Int32::ConstPtr& msg)
-{
-    _pRobot_Status.m_iCallback_Bumper = msg->data;
-
-    if(_pRobot_Status.m_iCallback_Bumper != 0)
-    {
-        memcpy(&pointcloud_.data[0 * pointcloud_.point_step + pointcloud_.fields[0].offset], &p_side_x_, sizeof(float));
-        memcpy(&pointcloud_.data[0 * pointcloud_.point_step + pointcloud_.fields[1].offset], &p_side_y_, sizeof(float));
-        memcpy(&pointcloud_.data[1 * pointcloud_.point_step + pointcloud_.fields[0].offset], &pc_radius_, sizeof(float));
-        memcpy(&pointcloud_.data[2 * pointcloud_.point_step + pointcloud_.fields[0].offset], &p_side_x_, sizeof(float));
-        memcpy(&pointcloud_.data[2 * pointcloud_.point_step + pointcloud_.fields[1].offset], &n_side_y_, sizeof(float));
-        pointcloud_.header.stamp = ros::Time(0);
-        pointcloud_pub_.publish(pointcloud_);
-
-        if(!_pFlag_Value.m_bFlag_Disable_bumper)
-        {
-            LED_Toggle_Control(1, 10,100,10,1);
-            LED_Turn_On(18);
-            printf("[Bumper] Push Bumper!! _ RED LED On \n");
-            else if(docking_progress > 10)
-            {
-                printf("Front Bumper hit in the LIFT STATION ! \n");
-                ex_iDocking_CommandMode = 16; // mwcha ... 231205
-            }
-            else if(_pFlag_Value.m_bflagGo)
-            {
-            goto_goal_id.id = "";
-            ROS_INFO("[Bumper On]Goto Cancel call");
-            GotoCancel_pub.publish(goto_goal_id);
-            _pFlag_Value.m_bflagGo = false;
-            _pFlag_Value.m_bflagGo2 = true;
-
-            if(_pFlag_Value.BUMPER_BT)
-                ex_iDocking_CommandMode = 100;
-            }
-        }
-        _pFlag_Value.m_bumperhit_flag = true;
-    }
-    else if(_pRobot_Status.m_iCallback_Bumper == 2 || _pRobot_Status.m_iCallback_Bumper == 3)
-    {
-        printf("[Switch] Push Servo Switch Button !! \n");
-    }
-    else // 230629 ... update loop by mwcha
-    { 
-        memcpy(&pointcloud_.data[0 * pointcloud_.point_step + pointcloud_.fields[0].offset], &P_INF_X, sizeof(float));
-        memcpy(&pointcloud_.data[0 * pointcloud_.point_step + pointcloud_.fields[1].offset], &P_INF_Y, sizeof(float));
-        memcpy(&pointcloud_.data[1 * pointcloud_.point_step + pointcloud_.fields[0].offset], &P_INF_X, sizeof(float));
-        memcpy(&pointcloud_.data[2 * pointcloud_.point_step + pointcloud_.fields[0].offset], &P_INF_X, sizeof(float));
-        memcpy(&pointcloud_.data[2 * pointcloud_.point_step + pointcloud_.fields[1].offset], &N_INF_Y, sizeof(float));
-        pointcloud_.header.stamp = ros::Time(0);
-        pointcloud_pub_.publish(pointcloud_);
-
-        if(_pFlag_Value.m_bumperhit_flag)
-        {
-            LED_Toggle_Control(1,3,100,3,1);
-            LED_Turn_On(63); //White led
-            _pFlag_Value.m_bumperhit_flag = false;
-        }
-
-    }
-
-
-}*/
 void Ultrasonic_DL_Callback(const sensor_msgs::Range::ConstPtr& msg)
 {
     m_Ultrasonic_DL_Range = msg->range;
@@ -2946,7 +3043,7 @@ void Ultrasonic_DR_Callback(const sensor_msgs::Range::ConstPtr& msg)
     m_Ultrasonic_DR_Range = msg->range;
 }
 
-/*
+
 void Ultrasonic_RL_Callback(const sensor_msgs::Range::ConstPtr& msg)
 {
     m_Ultrasonic_RL_Range = msg->range;
@@ -2958,17 +3055,20 @@ void Ultrasonic_RR_Callback(const sensor_msgs::Range::ConstPtr& msg)
 }
 */
 
-//Conveyor function
 void LoadcellCallback(const std_msgs::Float64::ConstPtr& msg)
 {
-    _pRobot_Status.m_dLoadcell_weight = msg->data;
+    _pRobot_Status.m_dLoadcell_weight = msg->data;//Conveyor function
 }
 
 void SensorCallback(const std_msgs::Int32::ConstPtr& msg)
 {
-    _pRobot_Status.m_iConveyor_Sensor_info = msg->data;
+    _pRobot_Status.m_iConveyor_Sensor_info = msg->data; //Conveyor function
 }
 
+void SensorCallback2(const std_msgs::Int32::ConstPtr& msg)
+{
+    _pRobot_Status.m_iLift_Sensor_info = msg->data; //Lift function
+}
 /////////LanMark file Write & Read Fuction///////////
 bool SaveLandMark(LANDMARK_POSE p)
 {
@@ -3091,17 +3191,17 @@ void resultCallback(const move_base_msgs::MoveBaseActionResult::ConstPtr& msgRes
         _pFlag_Value.m_bflag_ComebackHome = false;
     } 
 
-    if(_pFlag_Value.m_bflag_Conveyor_docking) //Conveyor Postion -> docking mode start
-    {
-        _pAR_tag_pose.m_iSelect_AR_tag_id = _pRobot_Status.CONVEYOR_ID;
-        ex_iDocking_CommandMode = 11;
-        _pFlag_Value.m_bflag_Conveyor_docking = false;
-    }
+    // if(_pFlag_Value.m_bflag_Conveyor_docking) //Conveyor Postion -> docking mode start
+    // {
+    //     _pAR_tag_pose.m_iSelect_AR_tag_id = _pRobot_Status.CONVEYOR_ID;
+    //     ex_iDocking_CommandMode = 11;
+    //     _pFlag_Value.m_bflag_Conveyor_docking = false;
+    // }
 
     if(_pFlag_Value.m_bflag_Lift_docking) //Lift Postion -> docking mode start ... 231123 mwcha
     {
         _pAR_tag_pose.m_iSelect_AR_tag_id = _pRobot_Status.LIFT_ID;
-        ex_iDocking_CommandMode = 21;
+        ex_iDocking_CommandMode = 11;
         _pFlag_Value.m_bflag_Lift_docking = false;
     }
 
@@ -3280,7 +3380,7 @@ bool rosnodekill_all()
     return m_Result;
 }
 
-bool rosnodekill_armarker10() //240104 mwcha
+bool set_armarker10() //240104 mwcha
 {
     bool m_Result = false;
 
@@ -3291,13 +3391,15 @@ bool rosnodekill_armarker10() //240104 mwcha
     char* ptr3 = &writable3[0];
     int iResult = std::system(ptr3);
 
-    ex_ilaunchMode = 0;
+    sleep(3);
+
+    // ex_iLiftMode = 10;
 
     m_Result = true;
     return m_Result;
 }
 
-bool rosnodekill_armarker20() //240104 mwcha
+bool set_armarker20() //240104 mwcha
 {
     bool m_Result = false;
 
@@ -3308,7 +3410,9 @@ bool rosnodekill_armarker20() //240104 mwcha
     char* ptr3 = &writable3[0];
     int iResult = std::system(ptr3);
 
-    ex_ilaunchMode = 0;
+    sleep(3);
+
+    // ex_iLiftMode = 20;
 
     m_Result = true;
     return m_Result;
@@ -3382,12 +3486,13 @@ bool Approach_Station2Move2()
             cmd->angular.z = 0.0;
             cmdpub_.publish(cmd);
             m_iDocking_timeout_cnt = 0;
-            ex_iDocking_CommandMode = 9;
+            ex_iDocking_CommandMode = 19;
 
         }
         else
         {
-            cmd->linear.x =  0.01; 
+            printf("Approach 2 LOOP IN LIFT !! \n");
+            cmd->linear.x = -0.01; 
             cmd->angular.z = 0.0;
             cmdpub_.publish(cmd);
             m_iDocking_timeout_cnt++;
@@ -3401,9 +3506,48 @@ bool Approach_Station2Move2()
         cmd->angular.z = 0.0;
         cmdpub_.publish(cmd);
         printf("Approach Loop STOP !! \n");
-        ex_iDocking_CommandMode = 16;
+        ex_iDocking_CommandMode = 17;
     }
-    
+
+    bResult = true;
+    return bResult;
+}
+
+bool Un_Approach_Station2Move2()
+{
+    bool bResult = false;
+    geometry_msgs::TwistPtr cmd(new geometry_msgs::Twist());
+
+    if(_pRobot_Status.m_iCallback_Charging_status <= 1)
+    {
+        if(m_iDocking_timeout_cnt > 3000)
+        {
+            cmd->linear.x =  0.0; 
+            cmd->angular.z = 0.0;
+            cmdpub_.publish(cmd);
+            m_iDocking_timeout_cnt = 0;
+            ex_iDocking_CommandMode = 29;
+
+        }
+        else
+        {
+            printf("Approach 2 LOOP IN LIFT !! \n");
+            cmd->linear.x = -0.01; 
+            cmd->angular.z = 0.0;
+            cmdpub_.publish(cmd);
+            m_iDocking_timeout_cnt++;
+            
+        }
+
+    }
+    else
+    {
+        cmd->linear.x =  0.0; 
+        cmd->angular.z = 0.0;
+        cmdpub_.publish(cmd);
+        printf("Approach Loop STOP !! \n");
+        ex_iDocking_CommandMode = 27;
+    }
 
     bResult = true;
     return bResult;
@@ -3566,7 +3710,7 @@ bool ChargingStation_tracking(bool bOn, int marker_id)
         cmd->angular.z = 0.0;
         cmdpub_.publish(cmd);
         printf("Docking Loop STOP!_not find Marker!! \n");
-        ex_iDocking_CommandMode = 0;
+        ex_iDocking_CommandMode = 119; //240202 mwcha
     }
     
 
@@ -3739,12 +3883,13 @@ bool ChargingStation_tracking2(int marker_id)
         cmd->linear.x =  0.0; 
         cmd->angular.z = 0.0;
         cmdpub_.publish(cmd);
-        printf("No Marker 2! \n");
+        printf("[Docking Error] [No Marker 2] After completing calibration and entering the charging station, the marker disappeared! \n"); //mwcha 240202
         if(m_iNoMarker_cnt >= 10)
         {
             m_iNoMarker_cnt = 0;
-             ex_iDocking_CommandMode = 6;
+            ex_iDocking_CommandMode = 6;
             printf("No Marker 2_Timeout! \n");
+            printf("Please Turn OFF and docking the robot! \n");
         }
         else
         {
@@ -3770,9 +3915,9 @@ bool LiftStation_tracking(bool bOn, int marker_id)
         {
             m_fdistance = sqrt(_pAR_tag_pose.m_transform_pose_x * _pAR_tag_pose.m_transform_pose_x + _pAR_tag_pose.m_transform_pose_y * _pAR_tag_pose.m_transform_pose_y);
             printf("master_distance: %.5f \n", m_fdistance);
-            if(m_fdistance > 1.6 && m_fdistance < 2.2) //adjust mwcha 231205
+            if(m_fdistance > 1.6 && m_fdistance < 2.0) //adjust mwcha 231205
             {
-                cmd->linear.x = 1.0 * (m_fdistance / 2.2) * 0.1; //adjust mwcha 231205
+                cmd->linear.x = 1.0 * (m_fdistance / 2.0) * 0.05; //adjust mwcha 231205
                 printf("linear velocity: %.2f \n", cmd->linear.x);
                 if(cmd->linear.x > 1.0)
                 {
@@ -3852,7 +3997,7 @@ bool LiftStation_Yaw_tracking()
     float m_fdistance = 0.0;
     m_fdistance = sqrt(_pAR_tag_pose.m_transform_pose_x * _pAR_tag_pose.m_transform_pose_x + _pAR_tag_pose.m_transform_pose_y * _pAR_tag_pose.m_transform_pose_y);
 
-    if(_pAR_tag_pose.m_target_yaw <= 0.03 && _pAR_tag_pose.m_target_yaw >= -0.03) //adjust by mwcha 231206 ... +- 1.0deg ... +-0.0174533
+    if(_pAR_tag_pose.m_target_yaw <= 0.02 && _pAR_tag_pose.m_target_yaw >= -0.02) //adjust by mwcha 231206 ... +- 1.0deg ... +-0.0174533
     {
         ex_iDocking_CommandMode = 14;
         bResult = true;
@@ -3862,11 +4007,11 @@ bool LiftStation_Yaw_tracking()
     if(_pAR_tag_pose.m_target_yaw > 0)
     {
         printf("--dir \n");
-        cmd->angular.z = -1.0 * _pAR_tag_pose.m_target_yaw * 1.45; //adjust mwcha 231206
+        cmd->angular.z = -1.0 * _pAR_tag_pose.m_target_yaw * 0.5; //adjust mwcha 231206
         cmdpub_.publish(cmd);
         sleep(2);
 
-        if(m_fdistance > 2.2 || m_fdistance < -2.2) //adjust mwcha 231205
+        if(m_fdistance > 2.0 || m_fdistance < -2.0) //adjust mwcha 231205
         {
             printf("[Error] Marker too far away !! \n");
             cmd->angular.z = 0.0;
@@ -3880,7 +4025,7 @@ bool LiftStation_Yaw_tracking()
 
         while(m_iback_cnt < 30)
         {
-            if(_pFlag_Value.m_bFlag_Obstacle_cygbot)
+            if(_pFlag_Value.m_bFlag_Obstacle_Left_b && _pFlag_Value.m_bFlag_Obstacle_Right_b)
             {
                 cmd->angular.z = 0.0;
                 cmd->linear.x = 0.0;
@@ -3906,11 +4051,11 @@ bool LiftStation_Yaw_tracking()
     else
     {
         printf("++dir \n");
-        cmd->angular.z = -1.0 * _pAR_tag_pose.m_target_yaw * 1.45; //adjust mwcha 231206
+        cmd->angular.z = -1.0 * _pAR_tag_pose.m_target_yaw * 0.5; //adjust mwcha 231206
         cmdpub_.publish(cmd);
         sleep(2);
 
-        if(m_fdistance > 2.2 || m_fdistance < -2.2) //adjust mwcha 231205
+        if(m_fdistance > 2.0 || m_fdistance < -2.0) //adjust mwcha 231205
         {
             printf("[Error] Marker too far away !! \n");
             cmd->angular.z = 0.0;
@@ -3924,7 +4069,7 @@ bool LiftStation_Yaw_tracking()
 
         while(m_iback_cnt < 30)
         {
-            if(_pFlag_Value.m_bFlag_Obstacle_cygbot)
+            if(_pFlag_Value.m_bFlag_Obstacle_Left_b && _pFlag_Value.m_bFlag_Obstacle_Right_b)
             {
                 cmd->angular.z = 0.0;
                 cmd->linear.x = 0.0;
@@ -3965,7 +4110,7 @@ bool LiftStation_tracking2(int marker_id)
         m_fdistance = sqrt(_pAR_tag_pose.m_transform_pose_x * _pAR_tag_pose.m_transform_pose_x + _pAR_tag_pose.m_transform_pose_y * _pAR_tag_pose.m_transform_pose_y);
         if(_pRobot_Status.m_iCallback_Bumper != 1)
         {
-            cmd->linear.x = 1.0 * (m_fdistance /2.2) * 0.1; //max speed 0.1m/s //adjust mwcha 231205
+            cmd->linear.x = 1.0 * (m_fdistance /2.0) * 0.05; //max speed 0.04m/s //adjust mwcha 231205
             printf("Lift linear velocity: %.2f \n", cmd->linear.x);
             if(cmd->linear.x > 1.0)
             {
@@ -3989,41 +4134,281 @@ bool LiftStation_tracking2(int marker_id)
             
             cmdpub_.publish(cmd);
         }
+        if (_pRobot_Status.m_iCallback_Bumper != 1)
+        {
+            // If bumper is not hit, continue tracking
+            return true;
+        }
         else
         {
             cmd->linear.x =  0.0; 
             cmd->angular.z = 0.0;
             cmdpub_.publish(cmd);
             printf("Lift (Conveyor) Tracking STOP & Docking Finish !! \n");
-            printf("Lift (Conveyor) Tracking STOP & Docking Finish !! \n");
-            printf("Lift (Conveyor) Tracking STOP & Docking Finish !! \n");
-            printf("Lift (Conveyor) Tracking STOP & Docking Finish !! \n");
-            printf("Lift (Conveyor) Tracking STOP & Docking Finish !! \n");
             ex_iDocking_CommandMode = 16;
             m_iNoMarker_cnt = 0;
+            return false;
         }
     }
-    /*else
+    bResult = true;
+    return bResult;
+}
+//////////////////////////////////////////////////////////////////////////////////////////////
+//Lift Station Docking Function2//
+bool Un_LiftStation_tracking(bool bOn, int marker_id)
+{
+    bool bResult = false;
+    geometry_msgs::TwistPtr cmd(new geometry_msgs::Twist());
+
+    if(bOn)
+    {
+        printf("LIFT_ID: %d  \n", marker_id); //adjust mwcha 231201
+        float m_fdistance = 0.0;
+        if(_pAR_tag_pose.m_iAR_tag_id == marker_id)
+        {
+            m_fdistance = sqrt(_pAR_tag_pose.m_transform_pose_x * _pAR_tag_pose.m_transform_pose_x + _pAR_tag_pose.m_transform_pose_y * _pAR_tag_pose.m_transform_pose_y);
+            printf("master_distance: %.5f \n", m_fdistance);
+            if(m_fdistance > 1.6 && m_fdistance < 2.0) //adjust mwcha 231205
+            {
+                cmd->linear.x = 1.0 * (m_fdistance / 2.0) * 0.05; //adjust mwcha 231205
+                printf("linear velocity: %.2f \n", cmd->linear.x);
+                if(cmd->linear.x > 1.0)
+                {
+                    //Linear Over speed exit loop...
+                    cmd->linear.x =  0.0; 
+                    cmd->angular.z = 0.0;
+                    printf("[Linear Over speed]: follower is closing \n");
+                    return false;
+                }
+                
+                cmd->angular.z = -1.0 * atan2(_pAR_tag_pose.m_transform_pose_y, _pAR_tag_pose.m_transform_pose_x) / 1.25;
+                //printf("angular velocity: %.2f \n", cmd->angular.z);
+                if((cmd->angular.z > 1.0) || (cmd->angular.z < -1.0))
+                {
+                    //Angular Over speed exit loop......
+                    cmd->linear.x =  0.0; 
+                    cmd->angular.z = 0.0;
+                    printf("[Angular Over speed]: follower is closing \n");
+                    return false;
+                }
+                
+                cmdpub_.publish(cmd);
+            }
+            else
+            {
+                cmd->linear.x =  0.0; 
+                //cmd->angular.z = 0.0;
+                cmdpub_.publish(cmd);
+                printf("Lift Tracking STOP !! \n");
+                ex_iDocking_CommandMode = 23;
+                m_iNoMarker_cnt = 0;
+            }
+        }
+        else
+        {
+            printf("No Marker, Rotation Movement !! \n");
+            cmd->angular.z = Rotation_Movement(); //0.1;
+            cmdpub_.publish(cmd);
+            if(m_iNoMarker_cnt > 4000) //retry timeout!!
+            {
+                m_iNoMarker_cnt = 0;
+                cmd->linear.x =  0.0; 
+                cmd->angular.z = 0.0;
+                cmdpub_.publish(cmd);
+                printf("Lift Station scan Fail !! \n");
+                ex_iDocking_CommandMode = 911; //adjust mwcha 231206
+
+            }
+            else
+            {
+                m_iNoMarker_cnt++;
+            }
+
+        }
+
+    }
+    else
     {
         cmd->linear.x =  0.0; 
         cmd->angular.z = 0.0;
         cmdpub_.publish(cmd);
-        printf("No Marker 2! \n");
-        if(m_iNoMarker_cnt >= 10)
-        {
-            m_iNoMarker_cnt = 0;
-             ex_iDocking_CommandMode = 16;
-            printf("No Marker 2_Timeout! \n");
-        }
-        else
-        {
-            m_iNoMarker_cnt++;
-        }
-    }*/
+        printf("Conveyor Docking Loop STOP!_not find Marker!! \n");
+        ex_iDocking_CommandMode = 0;
+    }
+    
 
     bResult = true;
     return bResult;
 }
+
+bool Un_LiftStation_Yaw_tracking()
+{ 
+    bool bResult = false;
+    geometry_msgs::TwistPtr cmd(new geometry_msgs::Twist());
+
+    int m_iback_cnt = 0;
+    float m_fdistance = 0.0;
+    m_fdistance = sqrt(_pAR_tag_pose.m_transform_pose_x * _pAR_tag_pose.m_transform_pose_x + _pAR_tag_pose.m_transform_pose_y * _pAR_tag_pose.m_transform_pose_y);
+
+    if(_pAR_tag_pose.m_target_yaw <= 0.02 && _pAR_tag_pose.m_target_yaw >= -0.02) //adjust by mwcha 231206 ... +- 1.0deg ... +-0.0174533
+    {
+        ex_iDocking_CommandMode = 24;
+        bResult = true;
+        return bResult;
+    }
+
+    if(_pAR_tag_pose.m_target_yaw > 0)
+    {
+        printf("--dir \n");
+        cmd->angular.z = -1.0 * _pAR_tag_pose.m_target_yaw * 0.5; //adjust mwcha 231206
+        cmdpub_.publish(cmd);
+        sleep(2);
+
+        if(m_fdistance > 2.0 || m_fdistance < -2.0) //adjust mwcha 231205
+        {
+            printf("[Error] Marker too far away !! \n");
+            cmd->angular.z = 0.0;
+            cmd->linear.x = 0.0;
+            cmdpub_.publish(cmd);
+
+            ex_iDocking_CommandMode = 911;
+            bResult = false;
+            return bResult;
+        }
+
+        while(m_iback_cnt < 30)
+        {
+            if(_pFlag_Value.m_bFlag_Obstacle_Left_b && _pFlag_Value.m_bFlag_Obstacle_Right_b)
+            {
+                cmd->angular.z = 0.0;
+                cmd->linear.x = 0.0;
+                cmdpub_.publish(cmd);
+            }
+            else
+            {
+                cmd->angular.z = 0.0;
+                cmd->linear.x = -1.0 * m_fdistance * 0.05; // 231206 mwcha
+                cmdpub_.publish(cmd);
+                m_iback_cnt++;
+            }
+            usleep(100000); //100ms
+            
+        }
+        cmd->angular.z = 0.0;
+        cmd->linear.x = 0.0;
+        cmdpub_.publish(cmd);
+        printf("--dir STOP \n");
+        m_iRotation_Mode = 2;
+        ex_iDocking_CommandMode = 22;
+    }
+    else
+    {
+        printf("++dir \n");
+        cmd->angular.z = -1.0 * _pAR_tag_pose.m_target_yaw * 0.5; //adjust mwcha 231206
+        cmdpub_.publish(cmd);
+        sleep(2);
+
+        if(m_fdistance > 2.0 || m_fdistance < -2.0) //adjust mwcha 231205
+        {
+            printf("[Error] Marker too far away !! \n");
+            cmd->angular.z = 0.0;
+            cmd->linear.x = 0.0;
+            cmdpub_.publish(cmd);
+
+            ex_iDocking_CommandMode = 911; //mwcha 231206
+            bResult = false;
+            return bResult;
+        }
+
+        while(m_iback_cnt < 30)
+        {
+            if(_pFlag_Value.m_bFlag_Obstacle_Left_b && _pFlag_Value.m_bFlag_Obstacle_Right_b)
+            {
+                cmd->angular.z = 0.0;
+                cmd->linear.x = 0.0;
+                cmdpub_.publish(cmd);
+            }
+            else
+            {
+                cmd->angular.z = 0.0;
+                cmd->linear.x = -1.0 * m_fdistance * 0.04; // 231204 mwcha
+                cmdpub_.publish(cmd);
+                m_iback_cnt++;
+            }
+            usleep(100000); //100ms
+            
+        }
+        cmd->angular.z = 0.0;
+        cmd->linear.x = 0.0;
+        cmdpub_.publish(cmd);
+        printf("++dir STOP \n");
+        m_iRotation_Mode = 1;
+        ex_iDocking_CommandMode = 22;
+    }
+    
+
+    bResult = true;
+    return bResult;
+}
+
+bool Un_LiftStation_tracking2(int marker_id)
+{
+    bool bResult = false;
+    geometry_msgs::TwistPtr cmd(new geometry_msgs::Twist());
+    printf("go to LIFT when H model hit front bumper \n");
+
+    float m_fdistance = 0.0;
+    if(_pAR_tag_pose.m_iAR_tag_id == marker_id)
+    {
+        printf("go to LIFT when H model hit front bumper 2 \n");
+
+        m_fdistance = sqrt(_pAR_tag_pose.m_transform_pose_x * _pAR_tag_pose.m_transform_pose_x + _pAR_tag_pose.m_transform_pose_y * _pAR_tag_pose.m_transform_pose_y);
+        if(_pRobot_Status.m_iCallback_Bumper != 1)
+        {
+            cmd->linear.x = 1.0 * (m_fdistance /2.0) * 0.05; //max speed 0.1m/s //adjust mwcha 231205
+            printf("Lift linear velocity: %.2f \n", cmd->linear.x);
+            if(cmd->linear.x > 1.0)
+            {
+                //Linear Over speed exit loop......
+                cmd->linear.x =  0.0; 
+                cmd->angular.z = 0.0;
+                printf("[Linear Over speed]: follower is closing \n");
+                return false;
+            }
+            
+            cmd->angular.z = -1.0 * atan2(_pAR_tag_pose.m_transform_pose_y, _pAR_tag_pose.m_transform_pose_x) / 1.25;
+            //printf("angular velocity: %.2f \n", cmd->angular.z);
+            if((cmd->angular.z > 1.0) || (cmd->angular.z < -1.0))
+            {
+                //Angular Over speed exit loop......
+                cmd->linear.x =  0.0; 
+                cmd->angular.z = 0.0;
+                printf("[Angular Over speed]: follower is closing \n");
+                return false;
+            }
+            
+            cmdpub_.publish(cmd);
+        }
+        if (_pRobot_Status.m_iCallback_Bumper != 1)
+        {
+            // If bumper is not hit, continue tracking
+            return true;
+        }
+        else
+        {
+            cmd->linear.x =  0.0; 
+            cmd->angular.z = 0.0;
+            cmdpub_.publish(cmd);
+            printf("Lift (Conveyor) Tracking STOP & Docking Finish !! \n");
+            ex_iDocking_CommandMode = 26;
+            m_iNoMarker_cnt = 0;
+            return false;
+        }
+    }
+    bResult = true;
+    return bResult;
+}
+///////////////////////////////////////////////////////////////////////////////////
 
 bool mapping_Command(tetraDS_service::runmapping::Request &req, 
 					 tetraDS_service::runmapping::Response &res)
@@ -4080,43 +4465,35 @@ bool nodekill_Command(tetraDS_service::rosnodekill::Request &req,
 	return true;
 }
 
-bool nodekill_marker10_Command(tetraDS_service::rosnode_markerkill10::Request &req, 
-					  tetraDS_service::rosnode_markerkill10::Response &res)
+bool set_marker10_Command(tetraDS_service::set_marker10::Request &req, 
+					  tetraDS_service::set_marker10::Response &res)
 {
 	bool bResult = false;
     
-    //bResult = req.flag_kill;
-
-    bResult = rosnodekill_armarker10();
-    printf("rosnodekill_armarker10: %d \n", bResult);
-    // sleep(1);
+    bResult = set_armarker10();
+    printf("set_armarker10: %d \n", bResult);
 
     /*
     ---
     bool command_Result
     */
-    //throw std::runtime_error("####this will show up");
 
 	res.command_Result = bResult;
 	return true;
 }
 
-bool nodekill_marker20_Command(tetraDS_service::rosnode_markerkill20::Request &req, 
-					  tetraDS_service::rosnode_markerkill20::Response &res)
+bool set_marker20_Command(tetraDS_service::set_marker20::Request &req, 
+					  tetraDS_service::set_marker20::Response &res)
 {
 	bool bResult = false;
     
-    //bResult = req.flag_kill;
-
-    bResult = rosnodekill_armarker20();
-    printf("rosnodekill_armarker20: %d \n", bResult);
-    // sleep(1);
+    bResult = set_armarker20();
+    printf("set_armarker20: %d \n", bResult);
 
     /*
     ---
     bool command_Result
     */
-    //throw std::runtime_error("####this will show up");
 
 	res.command_Result = bResult;
 	return true;
@@ -4440,7 +4817,7 @@ void *DockingThread_function(void *data)
             /****************************************************************/
             // Station Docking Loop ... H model docking ... docking station marker size = 10 // ... 231117 update by mwcha
             case 1:
-                //Dynamic_reconfigure_AR_marker_size_Set_DoubleParam("marker_size", 10.0);
+                set_armarker10();
                 printf("!! DockingThread_function_1 !! \n");
                 LED_Toggle_Control(1, 3,100,3,100);
                 LED_Turn_On(63);
@@ -4517,15 +4894,13 @@ void *DockingThread_function(void *data)
                 Depart_Station2Move();
                 break;
             /****************************************************************/
-            // Lift Docking Loop ... Lift station marker size = 20 // mwcha ... 231205
+            // Lift Docking Loop ... Need to change lift station marker size = 20 (set_marker20_cmd)
             case 11:
-                //Dynamic_reconfigure_AR_marker_size_Set_DoubleParam("marker_size", 20.0);
-                
-                LED_Toggle_Control(1, 3,100,3,100);
-                LED_Turn_On(63);
-                //usb_cam_On_client.call(m_request);
-                sleep(2);
-                ex_iDocking_CommandMode = 12;
+                set_armarker20();
+                printf("!! Lift_Thread_function_1 !! \n");
+                LiftMovement1(lift_cmd_client);
+                Lift_Check();
+                sleep(5); //wait 5sec
                 docking_progress.data = 11;
                 docking_progress_pub.publish(docking_progress);
                 break;
@@ -4534,6 +4909,7 @@ void *DockingThread_function(void *data)
 
                 LED_Toggle_Control(1, 3,100,3,100);
                 LED_Turn_On(63);
+
                 if(_pFlag_Value.m_bfalg_DockingExit)
                 {
                     Docking_EXIT();
@@ -4544,9 +4920,7 @@ void *DockingThread_function(void *data)
                 break;
             case 13:
                 _pAR_tag_pose.m_target_yaw = _pAR_tag_pose.m_fAR_tag_pitch;
-                
-                LED_Toggle_Control(1, 3,100,3,100);
-                LED_Turn_On(63);
+
                 LiftStation_Yaw_tracking();
                 if(_pFlag_Value.m_bfalg_DockingExit)
                 {
@@ -4558,9 +4932,6 @@ void *DockingThread_function(void *data)
                 break;
             case 14:
                 LiftStation_tracking2(_pAR_tag_pose.m_iSelect_AR_tag_id);
-
-                LED_Toggle_Control(1, 3,100,3,100);
-                LED_Turn_On(63);
                 if(_pFlag_Value.m_bfalg_DockingExit)
                 {
                     Docking_EXIT();
@@ -4580,114 +4951,110 @@ void *DockingThread_function(void *data)
                 docking_progress.data = 15;
                 docking_progress_pub.publish(docking_progress);
                 break;
-            case 16: // when hit the bumper in the lift
-                Depart_Lift_Move();
-                LED_Turn_On(63);
-                if(_pFlag_Value.m_bfalg_DockingExit)
-                {
-                    Docking_EXIT();
-                    ex_iDocking_CommandMode = 0;
-                }
+            case 16: // when hit the bumper in the lift ... departmove and get lift
+                Depart_10mm_Liftmove();
                 docking_progress.data = 16;
                 docking_progress_pub.publish(docking_progress);
                 break;
-            case 17: // when hit the bumper in the lift
-
-                LED_Turn_On(9);
-
-                printf("GO TO LIFT MOVE ... \n");
-                
-                Docking_EXIT();
-                ex_iDocking_CommandMode = 0;
-                
+            case 17: //Get out of lift hole and Lifting finished !
+                Depart_1500mm_Liftmove();
+                ROS_INFO_STREAM("TETRA Lifting FINISH And Get out of LIFT HOLE !!");
+                // ex_iLiftMode = 0;
+                break;
+                //finish lift and go back home
+            case 19:
+                printf("Lift Docking FAIL ! \n");
+                LED_Toggle_Control(1, 10,100,10,1);
+                LED_Turn_On(18);
+                ex_iDocking_CommandMode = 911;
                 break;
             /****************************************************************/
-            // Lift Docking Loop ... Lift station marker size = 20 // mwcha ... delete
-            /*case 21:
-                Dynamic_reconfigure_AR_marker_size_Set_DoubleParam("marker_size", 20.0);
-
-                LED_Toggle_Control(1, 3,100,3,100);
-                LED_Turn_On(63);
-                //usb_cam_On_client.call(m_request);
-                sleep(2);
-                ex_iDocking_CommandMode = 22;
-                docking_progress.data = 1;
+            case 21:
+                set_armarker20();
+                printf("!! Lift_Thread_function_2 !! \n");
+                // LiftMovement1(lift_cmd_client);
+                Un_Lift_Check();
+                sleep(5); //wait 5sec
+                docking_progress.data = 21;
                 docking_progress_pub.publish(docking_progress);
                 break;
             case 22:
-                //Lift_tracking(true, _pAR_tag_pose.m_iSelect_AR_tag_id);
+                Un_LiftStation_tracking(true, _pAR_tag_pose.m_iSelect_AR_tag_id);
+
+                LED_Toggle_Control(1, 3,100,3,100);
+                LED_Turn_On(63);
+
                 if(_pFlag_Value.m_bfalg_DockingExit)
                 {
                     Docking_EXIT();
                     ex_iDocking_CommandMode = 0;
                 }
-                docking_progress.data = 2;
+                docking_progress.data = 22;
                 docking_progress_pub.publish(docking_progress);
                 break;
             case 23:
                 _pAR_tag_pose.m_target_yaw = _pAR_tag_pose.m_fAR_tag_pitch;
-                //Lift_Yaw_tracking();
+
+                Un_LiftStation_Yaw_tracking();
                 if(_pFlag_Value.m_bfalg_DockingExit)
                 {
                     Docking_EXIT();
                     ex_iDocking_CommandMode = 0;
                 }
-                docking_progress.data = 3;
+                docking_progress.data = 23;
                 docking_progress_pub.publish(docking_progress);
                 break;
             case 24:
-                //Lift_tracking2(_pAR_tag_pose.m_iSelect_AR_tag_id);
+                Un_LiftStation_tracking2(_pAR_tag_pose.m_iSelect_AR_tag_id);
                 if(_pFlag_Value.m_bfalg_DockingExit)
                 {
                     Docking_EXIT();
                     ex_iDocking_CommandMode = 0;
                 }
-                docking_progress.data = 4;
+                docking_progress.data = 24;
                 docking_progress_pub.publish(docking_progress);
                 break;
             case 25:
                 //charging_port_On_client.call(m_request2);
-                //Approach_Station2Move2();
+                Un_Approach_Station2Move2();
                 if(_pFlag_Value.m_bfalg_DockingExit)
                 {
                     Docking_EXIT();
                     ex_iDocking_CommandMode = 0;
                 }
-                docking_progress.data = 5;
+                docking_progress.data = 25;
                 docking_progress_pub.publish(docking_progress);
                 break;
-            case 26:
-                LED_Turn_On(9);
-                //usb_cam_Off_client.call(m_request);
-                //ROS_INFO_STREAM("TETRA POSE Rest!");
-                m_iReset_flag = 1;
-                docking_progress.data = 6;
+            case 26: // when hit the bumper in the lift ... departmove and get lift
+                Un_Depart_10mm_Liftmove();
+                docking_progress.data = 26;
                 docking_progress_pub.publish(docking_progress);
-                //PoseReset_call
-                Reset_Robot_Pose();
-                
-                LED_Toggle_Control(1, 5,100,5,1);
-                LED_Turn_On(63);
-
-                ex_iDocking_CommandMode = 0;
-                break;*/
+                break;
+            case 27: //Get out of lift hole and Lifting finished !
+                Depart_1500mm_Liftmove();
+                ROS_INFO_STREAM("TETRA Lifting FINISH And Get out of LIFT HOLE !!");
+                // ex_iLiftMode = 0;
+                break;
+                //finish lift and go back home
+            case 29:
+                printf("Lift Docking FAIL ! \n");
+                LED_Toggle_Control(1, 10,100,10,1);
+                LED_Turn_On(18);
+                ex_iDocking_CommandMode = 911;
+                break;
             /****************************************************************/
             case 30:
                 _pFlag_Value.m_bCorneringFlag = false;
                 ex_iDocking_CommandMode = 0;
                 break;
+
             case 31:
                 _pFlag_Value.m_bCorneringFlag = true;
                 ex_iDocking_CommandMode = 0;
                 break;
 
             case 100: //Check Bumper
-                /*if(_pRobot_Status.m_iCallback_Bumper == 1)
-                {
-                    ex_iDocking_CommandMode = 16;
-                }
-                else*/
-                    BumperCollision_Behavior();
+                BumperCollision_Behavior();
                 break;
 
             case 119: //Retry Goto Home...
@@ -4706,26 +5073,41 @@ void *DockingThread_function(void *data)
                 setGoal(goal);
                 _pFlag_Value.m_bflag_ComebackHome = true;
                 ex_iDocking_CommandMode = 0;
-            
-            case 911: //Retry Goto LIFT HOME...
-                printf(" Retry Goto LIFT HOME ! \n");
-                //costmap clear call//
-                clear_costmap_client.call(m_request);
-                Depart_3sec_Liftmove();
-                ex_iDocking_CommandMode = 11;
+
+            case 151: //Lift UP call...
+                LiftMovement2(lift_cmd_client);
+                sleep(10);
+                printf("ROBOT BACKMOVE OF LIFT \n");
+                ex_iDocking_CommandMode = 17;
                 break;
 
+            case 171: //Lift Down and origin call...
+                LiftMovement1(lift_cmd_client);
+                sleep(10);
+                printf("ROBOT BACKMOVE OF LIFT \n");
+                ex_iDocking_CommandMode = 27;
+                break;           
+
             case 200: //Auto Patrol Loop...
-                if(_pRobot_Status.m_iCallback_Battery == HIGH_BATTERY && _pFlag_Value.m_bflag_auto_patrol)
+                if(_pFlag_Value.m_bflag_auto_patrol)
                 {
                     _pFlag_Value.m_bflag_patrol = true;
                     ex_iDocking_CommandMode = 0;
                 }
                 break;
+
+            case 911: //Retry Goto LIFT HOME...
+                printf(" Retry Goto LIFT HOME, Robot has error while he lifting ! \n");
+                //costmap clear call//
+                clear_costmap_client.call(m_request);
+                // ex_iLiftMode = 9;
+                ex_iDocking_CommandMode = 0;
+                //todo....
+                break;
             default:
                 break;
         }
-        //printf("ex_iDocking_CommandMode: %d \n", ex_iDocking_CommandMode);
+        printf("ex_iDocking_CommandMode: %d \n", ex_iDocking_CommandMode);
         usleep(20000); //20ms
     }
 
@@ -4734,7 +5116,7 @@ void *DockingThread_function(void *data)
 }
 
 /////*******************************************************************************//////
-////TEST Thread Loop...
+////Lift Thread Loop...
 void *AutoThread_function(void *data)
 {
     while(1)
@@ -4758,7 +5140,7 @@ void *AutoThread_function(void *data)
                     while(ex_iDocking_CommandMode != 0)
                     {
                         sleep(1); //1 sec
-                        ROS_INFO("Depart_Station2Move....");
+                        ROS_INFO("Docking check...in autothread");
                     }
 
                 }
@@ -4797,147 +5179,133 @@ void *AutoThread_function(void *data)
                 }
                 LED_Toggle_Control(1,3,100,3,1);
                 LED_Turn_On(100);
-                ROS_INFO("Battery Low - 15% : come back Home");
+                ROS_INFO("Battery Low - 15% : come back Home [While autothread] ");
 
                 _pFlag_Value.m_bflag_patrol = false;
                 
             }
         }
-        else if(_pFlag_Value.m_bflag_patrol2) //231123 mwcha
-        {
-            //  Step 1. -> Goto Lifting  //
-            LED_Toggle_Control(1,3,100,3,1);
-            LED_Turn_On(100); //blue led
+        // else if(_pFlag_Value.m_bflag_patrol2) // mwcha TODO !!!!!!
+        // {
+        //     //  Step 1. -> Check Before Lifting  //
+        //     LED_Toggle_Control(1,3,100,3,1);
+        //     LED_Turn_On(100); //blue led
 
-            OpenLocationFile(m_strLifting_lobcation_name);
-            goto_goal_id.id = m_strLifting_lobcation_name;
-            _pRobot_Status.LIFT_ID = m_iLifting_ID;
-            _pRobot_Status.LIFT_MOVEMENT = 0;
-            _pFlag_Value.m_bflag_Lift_docking = true;
+        //     OpenLocationFile(m_strLifting_lobcation_name);
+        //     goto_goal_id.id = m_strLifting_lobcation_name;
+        //     _pRobot_Status.LIFT_ID = m_iLifting_ID;
+        //     _pRobot_Status.LIFT_MOVEMENT = 0;
+        //     _pFlag_Value.m_bflag_Lift_docking = true;
 
-            if(_pRobot_Status.m_iCallback_Charging_status <= 1) //Nomal
-            {
-                setGoal(goal);
-            }
-            else //Docking check...
-            {
-                ex_iDocking_CommandMode = 10; //Depart Move
-            }
+        //     ROS_INFO("[patrol]: goto_lift-> Lifting...");
 
-            ROS_INFO("[patrol]: goto_lift-> Lifting...");
-            while(_pRobot_Status.m_iMovebase_Result != 3)
-            {
-                if(!_pFlag_Value.m_bflag_patrol2 && !_pFlag_Value.m_bflag_goto_cancel)
-                {
-                    goto_goal_id.id = "";
-                    ROS_INFO("Goto Cancel call");
-                    GotoCancel_pub.publish(goto_goal_id);
-                    _pFlag_Value.m_bflag_goto_cancel = true;
-                }
-                else
-                    usleep(1000000); //100ms
-            }
-            _pRobot_Status.m_iMovebase_Result = 0;
-            _pFlag_Value.m_bflag_goto_cancel = false;
+        //     while(_pRobot_Status.m_iMovebase_Result != 3)
+        //     {
+        //         if(!_pFlag_Value.m_bflag_patrol2 && !_pFlag_Value.m_bflag_goto_cancel)
+        //         {
+        //             goto_goal_id.id = "";
+        //             ROS_INFO("Goto Cancel call");
+        //             GotoCancel_pub.publish(goto_goal_id);
+        //             _pFlag_Value.m_bflag_goto_cancel = true;
+        //         }
+        //         else
+        //             usleep(1000000); //100ms
+        //     }
+        //     _pRobot_Status.m_iMovebase_Result = 0;
+        //     _pFlag_Value.m_bflag_goto_cancel = false;
 
-            while(_pRobot_Status.m_iCallback_Charging_status != 11)
-            {
-                if(!_pFlag_Value.m_bflag_patrol2 && !_pFlag_Value.m_bflag_goto_cancel)
-                {
-                    goto_goal_id.id = "";
-                    ROS_INFO("Goto Cancel call");
-                    GotoCancel_pub.publish(goto_goal_id);
-                    _pFlag_Value.m_bflag_goto_cancel = true;
-                }
-                else
-                    sleep(1); //1 sec
-            }
-            //Lift Movement...
-            lift_srv.request.start = 1; // need to test 231123
-            lift_cmd_client.call(lift_srv);
-            ROS_INFO("lift Service call");
-            sleep(1);
-            printf("_pRobot_Status.m_iLift_Sensor_info : %d \n", _pRobot_Status.m_iLift_Sensor_info );
-            //Lifting Finish Check
-        //    while(_pRobot_Status.m_iLift_Sensor_info > 1)
-        //    {
-        //        ROS_INFO("Lifting Loop Finish Wait...");
-        //        printf("_pRobot_Status.m_iLift_Sensor_info : %d \n", _pRobot_Status.m_iLift_Sensor_info );
-        //        sleep(1); //1 sec
-        //    }
-            sleep(5);
+        //     // while(_pRobot_Status.m_iCallback_Charging_status != 11)
+        //     // {
+        //     //     if(!_pFlag_Value.m_bflag_patrol2 && !_pFlag_Value.m_bflag_goto_cancel)
+        //     //     {
+        //     //         goto_goal_id.id = "";
+        //     //         ROS_INFO("Goto Cancel call");
+        //     //         GotoCancel_pub.publish(goto_goal_id);
+        //     //         _pFlag_Value.m_bflag_goto_cancel = true;
+        //     //     }
+        //     //     else
+        //     //         sleep(1); //1 sec
+        //     // }
 
-            //Step 2. -> Goto Unlifting ////////////////////////////////////////////////////////////
-            LED_Toggle_Control(1,3,100,3,1);
-            LED_Turn_On(100); //blue led
+        //     //  Step 2. -> Start Lifting  //
+        //     lift_srv.request.start = 1; // need to test 231123
+        //     lift_cmd_client.call(lift_srv);
+        //     ROS_INFO("lift Service call");
+        //     sleep(1);
+        //     printf("_pRobot_Status.m_iLift_Sensor_info : %d \n", _pRobot_Status.m_iLift_Sensor_info );
+        //     sleep(5);
 
-            OpenLocationFile(m_strUnlifting_lobcation_name);
-            goto_goal_id.id = m_strUnlifting_lobcation_name;
-            _pRobot_Status.LIFT_ID = m_iUnlifting_ID;
-            _pRobot_Status.LIFT_MOVEMENT = 2;
-            _pFlag_Value.m_bflag_Lift_docking = true;
+        //     //Step 3. -> Goto Unlifting ////////////////////////////////////////////////////////////
+        //     LED_Toggle_Control(1,3,100,3,1);
+        //     LED_Turn_On(100); //blue led
 
-            if(_pRobot_Status.m_iCallback_Charging_status <= 1) //Nomal
-            {
-                setGoal(goal);
-            }
-            else //Docking check...
-            {
-                ex_iDocking_CommandMode = 10; //Depart Move
-            }
+        //     OpenLocationFile(m_strUnlifting_lobcation_name);
+        //     goto_goal_id.id = m_strUnlifting_lobcation_name;
+        //     _pRobot_Status.LIFT_ID = m_iUnlifting_ID;
+        //     _pRobot_Status.LIFT_MOVEMENT = 2;
+        //     _pFlag_Value.m_bflag_Lift_docking = true;
 
-            sleep(1);
-            //Lift Movement...
-            lift_srv.request.start = 0;
-            lift_cmd_client.call(lift_srv);
+        //     if(_pRobot_Status.m_iCallback_Charging_status <= 1) //Nomal
+        //     {
+        //         setGoal(goal);
+        //     }
+        //     else //Docking check...
+        //     {
+        //         ex_iDocking_CommandMode = 10; //Depart Move
+        //     }
 
-            ROS_INFO("[patrol]: goto_lift-> Unlifting...");
-            while(_pRobot_Status.m_iMovebase_Result != 3)
-            {
-                if(!_pFlag_Value.m_bflag_patrol2 && !_pFlag_Value.m_bflag_goto_cancel)
-                {
-                    goto_goal_id.id = "";
-                    ROS_INFO("Goto Cancel call");
-                    GotoCancel_pub.publish(goto_goal_id);
-                    _pFlag_Value.m_bflag_goto_cancel = true;
-                }
-                else
-                    usleep(1000000); //100ms
-            }
-            _pRobot_Status.m_iMovebase_Result = 0;
-            _pFlag_Value.m_bflag_goto_cancel = false;
+        //     sleep(1);
+        //     //Lift Movement...
+        //     lift_srv.request.start = 0;
+        //     lift_cmd_client.call(lift_srv);
 
-            //Lift Movement...
-            sleep(1);
-            lift_srv.request.start = 1;
-            lift_cmd_client.call(lift_srv);
-            ROS_INFO("lift Service call");
+        //     ROS_INFO("[patrol]: goto_lift-> Unlifting...");
+        //     while(_pRobot_Status.m_iMovebase_Result != 3)
+        //     {
+        //         if(!_pFlag_Value.m_bflag_patrol2 && !_pFlag_Value.m_bflag_goto_cancel)
+        //         {
+        //             goto_goal_id.id = "";
+        //             ROS_INFO("Goto Cancel call");
+        //             GotoCancel_pub.publish(goto_goal_id);
+        //             _pFlag_Value.m_bflag_goto_cancel = true;
+        //         }
+        //         else
+        //             usleep(1000000); //100ms
+        //     }
+        //     _pRobot_Status.m_iMovebase_Result = 0;
+        //     _pFlag_Value.m_bflag_goto_cancel = false;
 
-            while(_pRobot_Status.m_iCallback_Charging_status != 13)
-            {
-                if(!_pFlag_Value.m_bflag_patrol2 && !_pFlag_Value.m_bflag_goto_cancel)
-                {
-                    goto_goal_id.id = "";
-                    ROS_INFO("Goto Cancel call");
-                    GotoCancel_pub.publish(goto_goal_id);
-                    _pFlag_Value.m_bflag_goto_cancel = true;
-                }
-                else
-                    sleep(1); //1 sec
-            }
+        //     //Lift Movement...
+        //     sleep(1);
+        //     lift_srv.request.start = 1;
+        //     lift_cmd_client.call(lift_srv);
+        //     ROS_INFO("lift Service call");
 
-            //Unlifting Finish Check
+        //     while(_pRobot_Status.m_iCallback_Charging_status != 13)
+        //     {
+        //         if(!_pFlag_Value.m_bflag_patrol2 && !_pFlag_Value.m_bflag_goto_cancel)
+        //         {
+        //             goto_goal_id.id = "";
+        //             ROS_INFO("Goto Cancel call");
+        //             GotoCancel_pub.publish(goto_goal_id);
+        //             _pFlag_Value.m_bflag_goto_cancel = true;
+        //         }
+        //         else
+        //             sleep(1); //1 sec
+        //     }
+
+        //     //Unlifting Finish Check
         //    while(_pRobot_Status.m_iLift_Sensor_info <= 1)
         //    {
         //        ROS_INFO("Unlifting Loop Finish Wait...");
         //        sleep(1); //1 sec
         //    }
 
-            sleep(1);
-            //Lift Movement...
-            lift_srv.request.start = 0;
-            lift_cmd_client.call(lift_srv);
-        }
+        //     sleep(1);
+        //     //Lift Movement...
+        //     lift_srv.request.start = 0;
+        //     lift_cmd_client.call(lift_srv);
+        // }
         
         sleep(1); //1sec
     }
@@ -5776,8 +6144,6 @@ int main (int argc, char** argv)
     mapping_service = service_h.advertiseService("mapping_cmd", mapping_Command);
     navigation_service = service_h.advertiseService("navigation_cmd", navigation_Command);
     nodekill_service = service_h.advertiseService("nodekill_cmd", nodekill_Command);
-    nodekill_marker10_service = service_h.advertiseService("node_marker_kill10_cmd", nodekill_marker10_Command); //240103 mwcha
-    nodekill_marker20_service = service_h.advertiseService("node_marker_kill20_cmd", nodekill_marker20_Command); //240103 mwcha
     //set initPose command//
     setinitpose_service = service_h.advertiseService("setinitpose_cmd", SetInitPose_Command);
     //set 2D_Pose_Estimate command//
@@ -5790,6 +6156,9 @@ int main (int argc, char** argv)
     gotolift_service = service_h.advertiseService("gotolift_cmd", Goto_Lift_Command);
     liftingcheck_service = service_h.advertiseService("liftingcheck_service_cmd", Lifting_check_Command);
     unliftingcheck_service = service_h.advertiseService("unliftingcheck_service_cmd", Unlifting_check_Command);
+    //Set_marker Service//
+    set_marker10_service = service_h.advertiseService("set_marker10_cmd", set_marker10_Command); //240103 mwcha
+    set_marker20_service = service_h.advertiseService("set_marker20_cmd", set_marker20_Command); //240103 mwcha
     //Patrol Service//
     patrol_service = service_h.advertiseService("patrol_cmd", Patrol_Command);
     //patrol_conveyor_service = service_h.advertiseService("patrol_conveyor_cmd", Patrol_Conveyor_Command);
@@ -5834,13 +6203,17 @@ int main (int argc, char** argv)
     ros::Subscriber emg_state = nInfo.subscribe<std_msgs::Int32>("emg_state", 1, EMGCallback);
     ros::Subscriber bumper_data = nInfo.subscribe<std_msgs::Int32>("bumper_data", 1, BumperCallback);
     ros::Subscriber docking_status = nInfo.subscribe<std_msgs::Int32>("docking_status", 1, ChargingCallback);
+    //ros::Subscriber marker_size = nInfo.subscribe<std_msgs::Int32>("marker_size", 1, MarkerSizeCallback);
     //Conveyor_Info Subscriber//
     ros::Subscriber loadcell_status = nInfo.subscribe<std_msgs::Float64>("conveyor_loadcell", 1, LoadcellCallback);
-    ros::Subscriber sensor_status = nInfo.subscribe<std_msgs::Int32>("conveyor_sensor", 1, SensorCallback);
+    //ros::Subscriber sensor_status = nInfo.subscribe<std_msgs::Int32>("conveyor_sensor", 1, SensorCallback);
+
+    //Lift_Info Subscriber//
+    ros::Subscriber sensor_status = nInfo.subscribe<std_msgs::Int32>("lift_sensor", 1, SensorCallback2); //pathing on tetraDS_interface
 
     //Ultrasonic_subscriber//
-    ros::Subscriber ultrasonic_FL = nInfo.subscribe<sensor_msgs::Range>("Ultrasonic_D_L", 10, Ultrasonic_DL_Callback);
-    ros::Subscriber ultrasonic_FR = nInfo.subscribe<sensor_msgs::Range>("Ultrasonic_D_R", 10, Ultrasonic_DR_Callback);
+    // ros::Subscriber ultrasonic_FL = nInfo.subscribe<sensor_msgs::Range>("Ultrasonic_D_L", 10, Ultrasonic_DL_Callback);
+    // ros::Subscriber ultrasonic_FR = nInfo.subscribe<sensor_msgs::Range>("Ultrasonic_D_R", 10, Ultrasonic_DR_Callback);
     //ros::Subscriber ultrasonic_RL = nInfo.subscribe<sensor_msgs::Range>("Ultrasonic_R_L", 10, Ultrasonic_RL_Callback);
     //ros::Subscriber ultrasonic_RR = nInfo.subscribe<sensor_msgs::Range>("Ultrasonic_R_R", 10, Ultrasonic_RR_Callback);
 
@@ -5942,7 +6315,7 @@ int main (int argc, char** argv)
             }
         }
 
-        if(_pFlag_Value.m_bFlag_Obstacle_PCL1 || m_iViaPoint_Index <= 1) // m_bFlag_Obstacle_Center ... H_model update by mwcha 231016
+        if(_pFlag_Value.m_bFlag_Obstacle_PCL1 || m_iViaPoint_Index <= 1)
         {
             if(!m_flag_Dynamic_Linear_velocity_major_update)
             {

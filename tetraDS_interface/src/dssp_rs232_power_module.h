@@ -45,3 +45,6 @@ int  dssp_rs232_power_module_loadcell_callibration();
 int  dssp_rs232_power_module_read_conveyor_sensor(int *Input);
 int  dssp_rs232_power_module_conveyor_manual_movement(int on);
 int  dssp_rs232_power_module_read_conveyor_movement(int* result);
+//lift
+int  dssp_rs232_power_module_lift_movement(int start);
+int  dssp_rs232_power_module_lift_manual_movement(int on);

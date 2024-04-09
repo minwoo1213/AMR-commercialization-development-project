@@ -21,6 +21,8 @@
 #include "tetraDS_interface/loadcell_callibration.h" //SRV
 #include "tetraDS_interface/conveyor_auto_movement.h" //SRV
 #include "tetraDS_interface/conveyor_manual_movement.h" //SRV
+#include "tetraDS_interface/lift_auto_movement.h" //SRV
+#include "tetraDS_interface/lift_manual_movement.h" //SRV
 #include "tetraDS_interface/power_get_io_status.h" //SRV
 
 #include <tetraDS_interface/power_set_enable.h> //SRV
@@ -119,6 +121,10 @@ double m_dLoadcell_weight = 0.0;
 int m_dConveyor_sensor = 0; 
 int m_iConveyor_movement = 0;
 bool m_bConveyor_option = true;
+//Lift sensor status// mwcha
+int m_dLift_sensor = 0; 
+int m_iLift_movement = 0;
+bool m_bLift_option = true;
 
 //ROS tetraDS_interface custom service
 ros::ServiceServer chargeport_service_on, chargeport_service_off;
@@ -152,12 +158,19 @@ ros::Publisher points_4;
 //Conveyor Loadcell CAL
 ros::ServiceServer loadcell_callibration_service;
 tetraDS_interface::loadcell_callibration CAL_cmd;
-//Conveyor Auto Movement
-ros::ServiceServer conveyor_auto_movement_service;
-tetraDS_interface::conveyor_auto_movement Auto_Move_cmd;
-//Conveyor Manual Movement
-ros::ServiceServer conveyor_manual_movement_service;
-tetraDS_interface::conveyor_manual_movement Manual_Move_cmd;
+// //Conveyor Auto Movement
+// ros::ServiceServer conveyor_auto_movement_service;
+// tetraDS_interface::conveyor_auto_movement Auto_Move_cmd;
+// //Conveyor Manual Movement
+// ros::ServiceServer conveyor_manual_movement_service;
+// tetraDS_interface::conveyor_manual_movement Manual_Move_cmd;
+
+//Lift Auto Movement
+ros::ServiceServer lift_auto_movement_service;
+tetraDS_interface::lift_auto_movement Auto_Move_cmd;
+//Lift Manual Movement
+ros::ServiceServer lift_manual_movement_service;
+tetraDS_interface::lift_manual_movement Manual_Move_cmd;
 
 //POWER Enalbe service
 ros::ServiceServer power_enable_service;
@@ -451,12 +464,44 @@ bool Loadcell_Callibration_Command(tetraDS_interface::loadcell_callibration::Req
 	return true;
 }
 
-bool Conveyor_Auto_Move_Command(tetraDS_interface::conveyor_auto_movement::Request  &req, 
-					tetraDS_interface::conveyor_auto_movement::Response &res)
+// bool Conveyor_Auto_Move_Command(tetraDS_interface::conveyor_auto_movement::Request  &req, 
+// 					tetraDS_interface::conveyor_auto_movement::Response &res)
+// {
+// 	bool bResult = false;
+    
+// 	dssp_rs232_power_module_conveyor_movement(req.start);
+//     /*
+//     int32 start
+//     ---
+//     bool command_Result
+//     */
+// 	bResult = true;
+// 	res.command_Result = bResult;
+// 	return true;
+// }
+
+// bool Conveyor_Manual_Move_Command(tetraDS_interface::conveyor_manual_movement::Request  &req, 
+// 					tetraDS_interface::conveyor_manual_movement::Response &res)
+// {
+// 	bool bResult = false;
+    
+// 	dssp_rs232_power_module_conveyor_manual_movement(req.mode);
+//     /*
+//     int32 mode
+//     ---
+//     bool command_Result
+//     */
+// 	bResult = true;
+// 	res.command_Result = bResult;
+// 	return true;
+// }
+
+bool Lift_Auto_Move_Command(tetraDS_interface::lift_auto_movement::Request  &req, 
+					tetraDS_interface::lift_auto_movement::Response &res)
 {
 	bool bResult = false;
     
-	dssp_rs232_power_module_conveyor_movement(req.start);
+	dssp_rs232_power_module_lift_movement(req.start);
     /*
     int32 start
     ---
@@ -467,8 +512,8 @@ bool Conveyor_Auto_Move_Command(tetraDS_interface::conveyor_auto_movement::Reque
 	return true;
 }
 
-bool Conveyor_Manual_Move_Command(tetraDS_interface::conveyor_manual_movement::Request  &req, 
-					tetraDS_interface::conveyor_manual_movement::Response &res)
+bool Lift_Manual_Move_Command(tetraDS_interface::lift_manual_movement::Request  &req, 
+					tetraDS_interface::lift_manual_movement::Response &res)
 {
 	bool bResult = false;
     
@@ -918,6 +963,8 @@ int main(int argc, char * argv[])
 	ros::Publisher conveyor_loadcell_publisher; //conveyor loadcell
 	ros::Publisher conveyor_sensor_publisher; //conveyor sensor *2ea
 	ros::Publisher conveyor_movement_publisher; //conveyor movement
+	ros::Publisher lift_sensor_publisher; //lift hall sensor
+	ros::Publisher lift_movement_publisher; //lift movement
 	ros::Publisher power_error_publisher;
 	ros::Publisher servo_pub;
 	std_msgs::Int32 servo;
@@ -943,10 +990,15 @@ int main(int argc, char * argv[])
 	//Loadcell service
 	ros::NodeHandle CONVEYOR_h;
 	loadcell_callibration_service = CONVEYOR_h.advertiseService("CAL_cmd", Loadcell_Callibration_Command);
-	//Conveyor Auto Movement Service
-	conveyor_auto_movement_service = CONVEYOR_h.advertiseService("Auto_Move_cmd", Conveyor_Auto_Move_Command);
-	//Conveyor Manual Movement Service
-	conveyor_manual_movement_service = CONVEYOR_h.advertiseService("Manual_Move_cmd", Conveyor_Manual_Move_Command);
+	// //Conveyor Auto Movement Service
+	// conveyor_auto_movement_service = CONVEYOR_h.advertiseService("Auto_Move_cmd", Conveyor_Auto_Move_Command);
+	// //Conveyor Manual Movement Service
+	// conveyor_manual_movement_service = CONVEYOR_h.advertiseService("Manual_Move_cmd", Conveyor_Manual_Move_Command);
+
+	//Lift Auto Movement Service
+	lift_auto_movement_service = CONVEYOR_h.advertiseService("Auto_Move_cmd", Lift_Auto_Move_Command);
+	//Lift Manual Movement Service
+	lift_manual_movement_service = CONVEYOR_h.advertiseService("Manual_Move_cmd", Lift_Manual_Move_Command);
 
 	//Integral Log Service
 	ros::NodeHandle log_h;
@@ -997,6 +1049,12 @@ int main(int argc, char * argv[])
 	std_msgs::Int32 conveyor_sensor;
 	conveyor_movement_publisher = n.advertise<std_msgs::Int32>("conveyor_movement", 1);
 	std_msgs::Int32 conveyor_movement;
+	
+	//Lift Status//
+	lift_sensor_publisher = n.advertise<std_msgs::Int32>("lift_sensor", 1);
+	std_msgs::Int32 lift_sensor;
+	lift_movement_publisher = n.advertise<std_msgs::Int32>("lift_movement", 1);
+	std_msgs::Int32 lift_movement;
 
 	//Servo On/Off publish
     	servo_pub = n.advertise<std_msgs::Int32>("Servo_ON",10);
@@ -1010,6 +1068,10 @@ int main(int argc, char * argv[])
 	//Read Conveyor Option Param Read//
 	n.getParam("conveyor_option", m_bConveyor_option);
 	printf("##conveyor_option: %d \n", m_bConveyor_option);
+
+	//Read Lift Option Param Read// mwcha
+	n.getParam("lift_option", m_bLift_option);
+	printf("##lift_option: %d \n", m_bLift_option);
 
 	//Ultrasonic Paramter Setting//////////////////////////////////
 	char frameid1[] = "/Ultrasonic_Down_Left";
@@ -1173,25 +1235,39 @@ int main(int argc, char * argv[])
 		Ultrasonic3_pub.publish(range_msg3);
 		Ultrasonic4_pub.publish(range_msg4);
 
-		if(m_bConveyor_option)
+		// if(m_bConveyor_option) //true
+		// {
+		// 	//Conveyor Loadcell weight
+		// 	dssp_rs232_power_module_read_loadcell(&m_dLoadcell_weight);
+
+		// 	conveyor_loadcell.data = m_dLoadcell_weight;
+		// 	conveyor_loadcell_publisher.publish(conveyor_loadcell);
+
+		// 	//Conveyor Sensor status
+		// 	dssp_rs232_power_module_read_conveyor_sensor(&m_dConveyor_sensor);
+
+		// 	conveyor_sensor.data = m_dConveyor_sensor;
+		// 	conveyor_sensor_publisher.publish(conveyor_sensor);
+
+		// 	//Conveyor Movement status
+		// 	dssp_rs232_power_module_read_conveyor_movement(&m_iConveyor_movement);
+
+		// 	conveyor_movement.data = m_iConveyor_movement;
+		// 	conveyor_movement_publisher.publish(conveyor_movement);
+		// }
+		if(m_bLift_option)
 		{
-			//Conveyor Loadcell weight
-			dssp_rs232_power_module_read_loadcell(&m_dLoadcell_weight);
+			//lift Sensor status...need to change firmware...
+			dssp_rs232_power_module_read_conveyor_sensor(&m_dLift_sensor);
 
-			conveyor_loadcell.data = m_dLoadcell_weight;
-			conveyor_loadcell_publisher.publish(conveyor_loadcell);
+			lift_sensor.data = m_dLift_sensor;
+			lift_sensor_publisher.publish(lift_sensor);
 
-			//Conveyor Sensor status
-			dssp_rs232_power_module_read_conveyor_sensor(&m_dConveyor_sensor);
+			//lift Movement status...need to change firmware...
+			dssp_rs232_power_module_read_conveyor_movement(&m_iLift_movement);
 
-			conveyor_sensor.data = m_dConveyor_sensor;
-			conveyor_sensor_publisher.publish(conveyor_sensor);
-
-			//Conveyor Movement status
-			dssp_rs232_power_module_read_conveyor_movement(&m_iConveyor_movement);
-
-			conveyor_movement.data = m_iConveyor_movement;
-			conveyor_movement_publisher.publish(conveyor_movement);
+			lift_movement.data = m_iLift_movement;
+			lift_movement_publisher.publish(lift_movement);
 		}
 
 		loop_rate.sleep();

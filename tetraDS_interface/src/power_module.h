@@ -74,3 +74,5 @@ int  power_loadcell_callibration(int fd);
 int  power_read_conveyor_sensor(int fd,  int *Input);
 int  power_conveyor_manual_movement(int fd, int on);
 int  power_read_conveyor_movement(int fd, int* result);
+//lift
+int  power_lift_movement(int fd, int mode);

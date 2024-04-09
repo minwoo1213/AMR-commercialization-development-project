@@ -35,8 +35,8 @@ add_service_files(
   runmapping.srv
   runnavigation.srv
   rosnodekill.srv
-  rosnode_markerkill10.srv
-  rosnode_markerkill20.srv
+  set_marker10.srv
+  set_marker20.srv
   getmaplist.srv
   ledcontrol.srv
   ledtogglecontrol.srv

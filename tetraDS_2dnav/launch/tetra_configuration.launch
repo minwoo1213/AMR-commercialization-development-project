@@ -5,7 +5,8 @@
   <param name="HOME_ID" value="0" />
   <param name="bumper_behavior" type="bool" value="true" />
   <param name="max_vel_x" type="double" value="0.6" />
-  <param name="conveyor_option" type="bool" value="true" />
+  <param name="conveyor_option" type="bool" value="false" /> <!--true-->
+  <param name="lift_option" type="bool" value="true" /> <!--false-->
   <param name="ekf_option" type="bool" value="true" /> <!--false-->
   <arg   name="ekf_option_flag" default="1"/>
   <param name="active_map" type="bool" value="false" />
