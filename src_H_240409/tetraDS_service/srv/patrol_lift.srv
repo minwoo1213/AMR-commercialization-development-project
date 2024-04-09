@@ -1,0 +1,9 @@
+#This message is used to send command to patrol_lift On
+
+bool on
+int32  lifting_id
+int32  unlifting_id
+string lifting_location_name
+string unlifting_location_name
+---
+bool command_Result

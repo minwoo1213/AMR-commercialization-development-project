@@ -1,0 +1,8 @@
+*.pyc
+.DS_Store
+.ropeproject
+
+build/
+dist/
+doc/build/
+pykalman.egg-info/
