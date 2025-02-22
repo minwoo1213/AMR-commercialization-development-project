@@ -3,12 +3,7 @@
 
 ### Dev Environmental: Ubuntu 18.04 ROS1 Melodic
 
-#### Custom Pkg: tetra*
-#### Launcher(sh): timed_roslaunch
-#### Usb_cam: usb_cam_develop
-#### Costmap: virtual_costmap*
-#### Imu: iahrs_driver-master
-#### Depth Fusion: 
+#### Descrptions are located in for each package
 
 <br>
 
